@@ -9,7 +9,7 @@ from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
 
-from tools.tools import retrieve_docs, screen_resume, route_query
+from src.tools.tools import retrieve_docs, screen_resume, route_query
 
 load_dotenv()
 

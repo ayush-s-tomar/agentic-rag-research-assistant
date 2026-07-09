@@ -9,7 +9,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from agent import run_agent
+from src.agent import run_agent
 
 app = FastAPI(title="Agentic RAG Research Assistant")
 
