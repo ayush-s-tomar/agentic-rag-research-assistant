@@ -1,0 +1,2 @@
+{"question": "Replace with a real question from your document set", "ground_truth": "Replace with the correct answer", "expected_tool": "retrieve_docs"}
+{"question": "Replace with another real question", "ground_truth": "Replace with the correct answer", "expected_tool": "retrieve_docs"}

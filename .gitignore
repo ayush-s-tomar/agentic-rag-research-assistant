@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.env
+data/chroma_db/*
+!data/chroma_db/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+src/eval/results.csv
+.streamlit/
