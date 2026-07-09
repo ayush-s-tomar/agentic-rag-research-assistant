@@ -6,7 +6,8 @@ Run: streamlit run frontend/app.py
 import streamlit as st
 import requests
 
-API_URL = "http://localhost:8000/ask"
+import os
+API_URL = os.getenv("API_URL", "http://localhost:8000/ask")
 
 st.set_page_config(page_title="Research Assistant", page_icon="🔎")
 st.title("🔎 Agentic RAG Research Assistant")

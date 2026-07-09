@@ -7,10 +7,18 @@ import time
 import csv
 import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from agent import run_agent
 
 app = FastAPI(title="Agentic RAG Research Assistant")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 LOG_PATH = "src/eval/request_log.csv"
 
