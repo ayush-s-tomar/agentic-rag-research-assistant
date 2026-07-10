@@ -10,7 +10,10 @@ import os
 import requests
 from langchain_core.tools import tool
 from langchain_community.vectorstores import Chroma
-from hf_embeddings import HFInferenceEmbeddings
+try:
+    from hf_embeddings import HFInferenceEmbeddings
+except ImportError:
+    from src.hf_embeddings import HFInferenceEmbeddings
 
 _embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 _db = Chroma(persist_directory="data/chroma_db", embedding_function=_embeddings)

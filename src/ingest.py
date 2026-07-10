@@ -7,7 +7,10 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from hf_embeddings import HFInferenceEmbeddings
+try:
+    from hf_embeddings import HFInferenceEmbeddings
+except ImportError:
+    from src.hf_embeddings import HFInferenceEmbeddings
 
 load_dotenv()
 
