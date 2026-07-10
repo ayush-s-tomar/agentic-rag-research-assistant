@@ -53,9 +53,9 @@ if question:
         st.write(question)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
+        with st.spinner("Thinking... (first question after idle time can take up to a minute — waking up the backend)"):
             try:
-                resp = requests.post(ASK_URL, json={"question": question}, timeout=60)
+                resp = requests.post(ASK_URL, json={"question": question}, timeout=100)
                 resp.raise_for_status()
                 data = resp.json()
                 answer = data["answer"]
