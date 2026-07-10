@@ -5,13 +5,14 @@ Run: streamlit run frontend/app.py
 """
 import streamlit as st
 import requests
+import time
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
 # Derive base URL once, build all endpoints from it
 API_BASE = os.getenv("API_URL", "http://localhost:8000").rstrip("/ask").rstrip("/")
-ASK_URL = f"{API_BASE}/ask"
+STREAM_URL = f"{API_BASE}/ask/stream"
 UPLOAD_URL = f"{API_BASE}/upload"
 DOCUMENTS_URL = f"{API_BASE}/documents"
 
@@ -83,16 +84,25 @@ if question:
         st.write(question)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking... (first question after idle time can take up to a minute — waking up the backend)"):
+        start = time.time()
+
+        def token_stream():
             try:
-                resp = requests.post(ASK_URL, json={"question": question}, timeout=100)
-                resp.raise_for_status()
-                data = resp.json()
-                answer = data["answer"]
-                st.write(answer)
-                st.caption(f"Latency: {data.get('latency_seconds', '?')}s")
+                with requests.post(
+                    STREAM_URL,
+                    json={"question": question},
+                    stream=True,
+                    timeout=100,
+                ) as resp:
+                    resp.raise_for_status()
+                    for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
+                        if chunk:
+                            yield chunk
             except requests.RequestException as e:
-                answer = f"Error contacting backend: {e}"
-                st.error(answer)
+                yield f"Error contacting backend: {e}"
+
+        answer = st.write_stream(token_stream())
+        latency = round(time.time() - start, 2)
+        st.caption(f"Latency: {latency}s")
 
     st.session_state.history.append(("assistant", answer))

@@ -9,11 +9,12 @@ import os
 import shutil
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from src.agent import run_agent
+from src.agent import run_agent, stream_agent
 from src.hf_embeddings import HFInferenceEmbeddings
 
 app = FastAPI(title="Agentic RAG Research Assistant")
@@ -54,6 +55,21 @@ def ask(q: Query):
     return {"answer": answer, "latency_seconds": latency}
 
 
+@app.post("/ask/stream")
+def ask_stream(q: Query):
+    start = time.time()
+    full_answer = []
+
+    def token_generator():
+        for token in stream_agent(q.question):
+            full_answer.append(token)
+            yield token
+        latency = round(time.time() - start, 2)
+        _log_request(q.question, "".join(full_answer), latency)
+
+    return StreamingResponse(token_generator(), media_type="text/plain")
+
+
 @app.post("/upload")
 def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
@@ -64,7 +80,6 @@ def upload_pdf(file: UploadFile = File(...)):
     with open(save_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # Only chunk the newly uploaded file — not the whole folder
     loader = PyPDFLoader(save_path)
     docs = loader.load()
     if not docs:
@@ -73,11 +88,9 @@ def upload_pdf(file: UploadFile = File(...)):
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
     chunks = splitter.split_documents(docs)
 
-    # Tag each chunk with a clean filename so we can list/delete by document later
     for chunk in chunks:
         chunk.metadata["source_file"] = file.filename
 
-    # Append to the existing store instead of rebuilding it from scratch
     db = _get_db()
     db.add_documents(chunks)
 
