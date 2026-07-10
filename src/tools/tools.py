@@ -10,9 +10,9 @@ import os
 import requests
 from langchain_core.tools import tool
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from hf_embeddings import HFInferenceEmbeddings
 
-_embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+_embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 _db = Chroma(persist_directory="data/chroma_db", embedding_function=_embeddings)
 
 

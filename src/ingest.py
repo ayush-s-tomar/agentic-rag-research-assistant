@@ -2,10 +2,14 @@
 Phase 1 — Load, chunk, and embed documents from data/raw/ into Chroma
 Run: python src/ingest.py
 """
+import os
+from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from hf_embeddings import HFInferenceEmbeddings
+
+load_dotenv()
 
 
 def load_and_chunk(data_dir="data/raw", chunk_size=800, chunk_overlap=100):
@@ -25,7 +29,7 @@ def load_and_chunk(data_dir="data/raw", chunk_size=800, chunk_overlap=100):
 
 
 def embed_and_store(chunks, persist_dir="data/chroma_db"):
-    embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+    embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
     vectorstore = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings,
