@@ -1,7 +1,7 @@
 """
 Phase 3a — Tools the agent can call.
 
-- retrieve_docs: search the local vector store
+- retrieve_docs: search the Qdrant Cloud vector store
 - screen_resume: call your fine-tuned LoRA resume screener (llm-finetune-resume-screener project),
   expected to be running as its own local endpoint (see RESUME_SCREENER_URL in .env)
 - route_query: decide cheap-model vs big-model, reusing your llm-cost-router logic
@@ -9,14 +9,12 @@ Phase 3a — Tools the agent can call.
 import os
 import requests
 from langchain_core.tools import tool
-from langchain_community.vectorstores import Chroma
 try:
-    from hf_embeddings import HFInferenceEmbeddings
+    from vectorstore import get_vectorstore
 except ImportError:
-    from src.hf_embeddings import HFInferenceEmbeddings
+    from src.vectorstore import get_vectorstore
 
-_embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
-_db = Chroma(persist_directory="data/chroma_db", embedding_function=_embeddings)
+_db = get_vectorstore()
 
 
 @tool

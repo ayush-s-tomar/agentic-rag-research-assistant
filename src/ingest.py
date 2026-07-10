@@ -1,16 +1,15 @@
 """
-Phase 1 — Load, chunk, and embed documents from data/raw/ into Chroma
+Phase 1 — Load, chunk, and embed documents from data/raw/ into Qdrant Cloud
 Run: python src/ingest.py
 """
 import os
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
 try:
-    from hf_embeddings import HFInferenceEmbeddings
+    from vectorstore import get_vectorstore
 except ImportError:
-    from src.hf_embeddings import HFInferenceEmbeddings
+    from src.vectorstore import get_vectorstore
 
 load_dotenv()
 
@@ -31,14 +30,10 @@ def load_and_chunk(data_dir="data/raw", chunk_size=800, chunk_overlap=100):
     return chunks
 
 
-def embed_and_store(chunks, persist_dir="data/chroma_db"):
-    embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=persist_dir,
-    )
-    print(f"Stored {len(chunks)} chunks in {persist_dir}")
+def embed_and_store(chunks):
+    vectorstore = get_vectorstore()
+    vectorstore.add_documents(chunks)
+    print(f"Stored {len(chunks)} chunks in Qdrant Cloud")
     return vectorstore
 
 
