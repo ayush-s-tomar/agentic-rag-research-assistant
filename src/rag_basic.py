@@ -7,11 +7,14 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+try:
+    from hf_embeddings import HFInferenceEmbeddings
+except ImportError:
+    from src.hf_embeddings import HFInferenceEmbeddings
 
 load_dotenv()
 client = OpenAI()
-embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 db = Chroma(persist_directory="data/chroma_db", embedding_function=embeddings)
 
 
