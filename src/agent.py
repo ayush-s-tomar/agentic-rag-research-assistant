@@ -8,13 +8,19 @@ from dotenv import load_dotenv
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
+from openai import RateLimitError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from src.tools.tools import retrieve_docs, screen_resume, route_query
 
 load_dotenv()
 
+# llama-3.3-70b-versatile was deprecated by Groq on 2026-06-17 and shuts down
+# 2026-08-16. openai/gpt-oss-120b is Groq's recommended replacement, keeps
+# full tool-calling support (required for this agent), and has a higher
+# free-tier daily token budget (200K TPD vs 100K TPD).
 llm = ChatOpenAI(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     temperature=0,
     api_key=os.getenv("GROQ_API_KEY"),
     base_url="https://api.groq.com/openai/v1",
@@ -30,13 +36,38 @@ don't have that information in the provided documents — do not answer from you
 general knowledge, even for well-known facts."""
 
 
-def run_agent(question: str) -> str:
-    result = _agent.invoke({
+@retry(
+    retry=retry_if_exception_type(RateLimitError),
+    stop=stop_after_attempt(2),
+    wait=wait_fixed(2),
+    reraise=True,
+)
+def _invoke_agent(question: str):
+    return _agent.invoke({
         "messages": [
             SystemMessage(content=SYSTEM_PROMPT),
             {"role": "user", "content": question},
         ]
     })
+
+
+def run_agent(question: str) -> str:
+    """Run the agent on a question.
+
+    Retries once on a transient rate-limit error (e.g. a short per-minute
+    cap), then gives up and lets the caller (the /ask endpoint) handle it.
+    A daily-cap rate limit (like the one that broke the demo earlier) has
+    a multi-minute retry-after, so this won't paper over that — it'll
+    still surface as an error, just after one quick retry instead of
+    immediately.
+    """
+    try:
+        result = _invoke_agent(question)
+    except RateLimitError as e:
+        return (
+            "The model provider is currently rate-limited (this usually clears "
+            f"within a few minutes on the free tier). Details: {e}"
+        )
     final_message = result["messages"][-1]
     return final_message.content
 
