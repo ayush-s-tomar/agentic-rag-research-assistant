@@ -5,13 +5,38 @@ Run: streamlit run frontend/app.py
 """
 import streamlit as st
 import requests
-
 import os
-API_URL = os.getenv("API_URL", "http://localhost:8000/ask")
+from dotenv import load_dotenv
+load_dotenv()
+
+# Derive base URL once, build both endpoints from it
+API_BASE = os.getenv("API_URL", "http://localhost:8000").rstrip("/ask").rstrip("/")
+ASK_URL = f"{API_BASE}/ask"
+UPLOAD_URL = f"{API_BASE}/upload"
 
 st.set_page_config(page_title="Research Assistant", page_icon="🔎")
 st.title("🔎 Agentic RAG Research Assistant")
 st.caption("Ask a question — the agent will retrieve documents, route to the right model, and answer.")
+
+# --- Sidebar: PDF upload ---
+with st.sidebar:
+    st.header("📄 Upload a document")
+    uploaded_file = st.file_uploader("Add a PDF to the knowledge base", type=["pdf"])
+
+    if uploaded_file is not None:
+        if st.button("Upload & Ingest"):
+            with st.spinner("Uploading and embedding..."):
+                try:
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
+                    resp = requests.post(UPLOAD_URL, files=files, timeout=120)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if "error" in data:
+                        st.error(data["error"])
+                    else:
+                        st.success(f"Added {data['filename']} — {data['chunks_added']} chunks embedded.")
+                except requests.RequestException as e:
+                    st.error(f"Upload failed: {e}")
 
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -30,7 +55,7 @@ if question:
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
-                resp = requests.post(API_URL, json={"question": question}, timeout=60)
+                resp = requests.post(ASK_URL, json={"question": question}, timeout=60)
                 resp.raise_for_status()
                 data = resp.json()
                 answer = data["answer"]

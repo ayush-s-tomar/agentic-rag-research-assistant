@@ -6,10 +6,12 @@ Then open http://localhost:8000/docs
 import time
 import csv
 import os
-from fastapi import FastAPI
+import shutil
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from src.agent import run_agent
+from src.ingest import load_and_chunk, embed_and_store
 
 app = FastAPI(title="Agentic RAG Research Assistant")
 
@@ -21,6 +23,7 @@ app.add_middleware(
 )
 
 LOG_PATH = "src/eval/request_log.csv"
+RAW_DIR = "data/raw"
 
 
 class Query(BaseModel):
@@ -40,6 +43,28 @@ def ask(q: Query):
 
     _log_request(q.question, answer, latency)
     return {"answer": answer, "latency_seconds": latency}
+
+
+@app.post("/upload")
+def upload_pdf(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".pdf"):
+        return {"error": "Only PDF files are supported."}
+
+    os.makedirs(RAW_DIR, exist_ok=True)
+    save_path = os.path.join(RAW_DIR, file.filename)
+    with open(save_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    chunks = load_and_chunk(data_dir=RAW_DIR)
+    if not chunks:
+        return {"error": "No content could be extracted from the PDF."}
+
+    embed_and_store(chunks)
+    return {
+        "status": "success",
+        "filename": file.filename,
+        "chunks_added": len(chunks),
+    }
 
 
 def _log_request(question: str, answer: str, latency: float):
