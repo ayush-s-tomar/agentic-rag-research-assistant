@@ -34,6 +34,11 @@ class Query(BaseModel):
     question: str
 
 
+def _get_db():
+    embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+    return Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -68,9 +73,12 @@ def upload_pdf(file: UploadFile = File(...)):
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
     chunks = splitter.split_documents(docs)
 
+    # Tag each chunk with a clean filename so we can list/delete by document later
+    for chunk in chunks:
+        chunk.metadata["source_file"] = file.filename
+
     # Append to the existing store instead of rebuilding it from scratch
-    embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
-    db = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+    db = _get_db()
     db.add_documents(chunks)
 
     return {
@@ -78,6 +86,33 @@ def upload_pdf(file: UploadFile = File(...)):
         "filename": file.filename,
         "chunks_added": len(chunks),
     }
+
+
+@app.get("/documents")
+def list_documents():
+    db = _get_db()
+    result = db.get(include=["metadatas"])
+    metadatas = result.get("metadatas", [])
+
+    counts: dict[str, int] = {}
+    for meta in metadatas:
+        name = meta.get("source_file") or meta.get("source", "unknown")
+        counts[name] = counts.get(name, 0) + 1
+
+    documents = [{"filename": name, "chunks": count} for name, count in counts.items()]
+    return {"documents": documents}
+
+
+@app.delete("/documents/{filename}")
+def delete_document(filename: str):
+    db = _get_db()
+    db._collection.delete(where={"source_file": filename})
+
+    file_path = os.path.join(RAW_DIR, filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+    return {"status": "deleted", "filename": filename}
 
 
 def _log_request(question: str, answer: str, latency: float):
