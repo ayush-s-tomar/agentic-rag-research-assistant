@@ -17,7 +17,7 @@ app = FastAPI(title="Agentic RAG Research Assistant")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://agentic-rag-groq.streamlit.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
