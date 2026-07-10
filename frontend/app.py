@@ -25,10 +25,10 @@ with st.sidebar:
 
     if uploaded_file is not None:
         if st.button("Upload & Ingest"):
-            with st.spinner("Uploading and embedding..."):
+            with st.spinner("Uploading and embedding... (first request after idle time can take up to a minute)"):
                 try:
                     files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
-                    resp = requests.post(UPLOAD_URL, files=files, timeout=120)
+                    resp = requests.post(UPLOAD_URL, files=files, timeout=300)
                     resp.raise_for_status()
                     data = resp.json()
                     if "error" in data:

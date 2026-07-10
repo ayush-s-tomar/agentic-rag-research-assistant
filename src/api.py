@@ -10,8 +10,11 @@ import shutil
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
 from src.agent import run_agent
-from src.ingest import load_and_chunk, embed_and_store
+from src.hf_embeddings import HFInferenceEmbeddings
 
 app = FastAPI(title="Agentic RAG Research Assistant")
 
@@ -24,6 +27,7 @@ app.add_middleware(
 
 LOG_PATH = "src/eval/request_log.csv"
 RAW_DIR = "data/raw"
+CHROMA_DIR = "data/chroma_db"
 
 
 class Query(BaseModel):
@@ -55,11 +59,20 @@ def upload_pdf(file: UploadFile = File(...)):
     with open(save_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    chunks = load_and_chunk(data_dir=RAW_DIR)
-    if not chunks:
+    # Only chunk the newly uploaded file — not the whole folder
+    loader = PyPDFLoader(save_path)
+    docs = loader.load()
+    if not docs:
         return {"error": "No content could be extracted from the PDF."}
 
-    embed_and_store(chunks)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+    chunks = splitter.split_documents(docs)
+
+    # Append to the existing store instead of rebuilding it from scratch
+    embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+    db = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+    db.add_documents(chunks)
+
     return {
         "status": "success",
         "filename": file.filename,
