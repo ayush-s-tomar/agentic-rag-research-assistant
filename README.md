@@ -158,4 +158,8 @@ CORS on the backend is scoped to the deployed Streamlit origin only.
 
 ## What I'd improve with more time
 
+<<<<<<< HEAD
 _Fill in: e.g. persistent vector store, streaming responses, better tool-call error recovery, real cost-router integration._
+=======
+_Fill in: e.g. persistent vector store, streaming responses, better tool-call error recovery, real cost-router integration._
+>>>>>>> b87c673099e0f77ff4f953d41c98d7a26b40c210
