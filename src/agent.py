@@ -44,7 +44,14 @@ _CITATION_ARTIFACT_RE = re.compile(r"【[^】]*】")
 
 
 def _clean(text: str) -> str:
-    return _CITATION_ARTIFACT_RE.sub("", text).strip()
+    """Remove citation artifacts only. Does NOT strip whitespace — this
+    function is called on individual streamed token chunks, and stripping
+    leading/trailing spaces from each tiny chunk destroys word boundaries
+    (e.g. a token " the" loses its leading space and glues onto the
+    previous word). Only strip whitespace on a fully-assembled string,
+    never on a per-token fragment.
+    """
+    return _CITATION_ARTIFACT_RE.sub("", text)
 
 
 def _build_messages(question: str):
@@ -84,7 +91,9 @@ def run_agent(question: str) -> str:
             f"within a few minutes on the free tier). Details: {e}"
         )
     final_message = result["messages"][-1]
-    return _clean(final_message.content)
+    # Safe to strip here — this is the complete, final assembled answer,
+    # not an individual streamed fragment.
+    return _clean(final_message.content).strip()
 
 
 def stream_agent(question: str):
@@ -97,10 +106,11 @@ def stream_agent(question: str):
     been sent to the client).
 
     Citation artifacts like 【retrieve_docs】 are stripped per-token where
-    possible, but since a marker can span multiple streamed chunks, a final
-    cleanup pass also happens in the API layer on the fully assembled answer
-    if needed. For most cases the per-chunk strip below is sufficient since
-    the artifact usually arrives as a single contiguous chunk.
+    possible, but since a marker can span multiple streamed chunks, a
+    residual fragment may occasionally slip through — this is a rare
+    cosmetic edge case, not a functional bug. Whitespace is intentionally
+    NOT stripped per-chunk so word spacing is preserved across token
+    boundaries.
     """
     try:
         for chunk, metadata in _agent.stream(
