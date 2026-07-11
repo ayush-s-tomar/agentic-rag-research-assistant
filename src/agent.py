@@ -37,19 +37,16 @@ don't have that information in the provided documents — do not answer from you
 general knowledge, even for well-known facts."""
 
 # gpt-oss-120b occasionally leaks raw tool-call citation markers like
-# 【retrieve_docs】 into the final answer text. Strip these before returning
-# anything to the user — they're an internal formatting artifact, not
-# content meant to be displayed.
+# 【retrieve_docs】 or 【source】 into the final answer text. Strip these
+# before returning anything to the user — they're an internal formatting
+# artifact, not content meant to be displayed.
 _CITATION_ARTIFACT_RE = re.compile(r"【[^】]*】")
 
 
 def _clean(text: str) -> str:
-    """Remove citation artifacts only. Does NOT strip whitespace — this
-    function is called on individual streamed token chunks, and stripping
-    leading/trailing spaces from each tiny chunk destroys word boundaries
-    (e.g. a token " the" loses its leading space and glues onto the
-    previous word). Only strip whitespace on a fully-assembled string,
-    never on a per-token fragment.
+    """Remove citation artifacts from a complete string. Does NOT strip
+    whitespace — safe to call on a fully-assembled answer, but NOT on
+    individual streamed token chunks (see stream_agent for why).
     """
     return _CITATION_ARTIFACT_RE.sub("", text)
 
@@ -100,28 +97,58 @@ def stream_agent(question: str):
     """Yield the answer token-by-token as it's generated.
 
     Only yields text from the FINAL AI message (the answer), not intermediate
-    tool-call chunks — those have no content to stream and would just yield
-    empty strings. If a RateLimitError happens mid-stream, yields an error
-    message and stops (no retry here, since partial output may already have
-    been sent to the client).
+    tool-call chunks. If a RateLimitError happens mid-stream, yields an
+    error message and stops.
 
-    Citation artifacts like 【retrieve_docs】 are stripped per-token where
-    possible, but since a marker can span multiple streamed chunks, a
-    residual fragment may occasionally slip through — this is a rare
-    cosmetic edge case, not a functional bug. Whitespace is intentionally
-    NOT stripped per-chunk so word spacing is preserved across token
-    boundaries.
+    Citation markers like 【source】 can be split across multiple streamed
+    chunks (e.g. one chunk ends "...【sour" and the next starts "ce】...").
+    A per-chunk regex can't catch that, so instead we buffer text: any
+    chunk starting with a partial "【" marker is held back until either
+    its closing "】" arrives (then the whole marker is dropped) or we
+    confirm no marker is starting. Clean text with no open marker is
+    flushed immediately, so streaming still feels responsive.
     """
+    buffer = ""
     try:
         for chunk, metadata in _agent.stream(
             _build_messages(question),
             stream_mode="messages",
         ):
-            if isinstance(chunk, AIMessageChunk) and chunk.content:
-                if metadata.get("langgraph_node") == "agent":
-                    cleaned = _clean(chunk.content)
-                    if cleaned:
-                        yield cleaned
+            if not (isinstance(chunk, AIMessageChunk) and chunk.content):
+                continue
+            if metadata.get("langgraph_node") != "agent":
+                continue
+
+            buffer += chunk.content
+
+            while True:
+                start = buffer.find("【")
+                if start == -1:
+                    if buffer:
+                        yield buffer
+                        buffer = ""
+                    break
+
+                if start > 0:
+                    yield buffer[:start]
+                    buffer = buffer[start:]
+
+                end = buffer.find("】")
+                if end == -1:
+                    # Marker not closed yet — wait for more chunks
+                    break
+
+                # Complete marker found — drop it, keep scanning the
+                # remainder in case there's more clean text or another
+                # marker right after it
+                buffer = buffer[end + 1:]
+
+        # Flush anything left over at the end of the stream (e.g. a
+        # stray "【" that never closed — just show it rather than
+        # silently eating real content)
+        if buffer:
+            yield buffer
+
     except RateLimitError as e:
         yield (
             "\n\n[The model provider is currently rate-limited. "
