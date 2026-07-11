@@ -20,6 +20,9 @@ st.set_page_config(page_title="Research Assistant", page_icon="🔎")
 st.title("🔎 Agentic RAG Research Assistant")
 st.caption("Ask a question — the agent will retrieve documents, route to the right model, and answer.")
 
+if "last_upload_status" not in st.session_state:
+    st.session_state.last_upload_status = None
+
 # --- Sidebar: PDF upload + document list ---
 with st.sidebar:
     st.header("📄 Upload a document")
@@ -34,12 +37,22 @@ with st.sidebar:
                     resp.raise_for_status()
                     data = resp.json()
                     if "error" in data:
-                        st.error(data["error"])
+                        st.session_state.last_upload_status = ("error", data["error"])
                     else:
-                        st.success(f"Added {data['filename']} — {data['chunks_added']} chunks embedded.")
-                        st.rerun()
+                        st.session_state.last_upload_status = (
+                            "success",
+                            f"Added {data['filename']} — {data['chunks_added']} chunks embedded.",
+                        )
                 except requests.RequestException as e:
-                    st.error(f"Upload failed: {e}")
+                    st.session_state.last_upload_status = ("error", f"Upload failed: {e}")
+
+    # Show the result of the last upload attempt, persisted across reruns
+    if st.session_state.last_upload_status:
+        kind, msg = st.session_state.last_upload_status
+        if kind == "success":
+            st.success(msg)
+        else:
+            st.error(msg)
 
     st.divider()
     st.header("📚 Knowledge base")
@@ -65,6 +78,7 @@ with st.sidebar:
                     try:
                         del_resp = requests.delete(f"{DOCUMENTS_URL}/{doc['filename']}", timeout=30)
                         del_resp.raise_for_status()
+                        st.session_state.last_upload_status = None
                         st.rerun()
                     except requests.RequestException as e:
                         st.error(f"Delete failed: {e}")
