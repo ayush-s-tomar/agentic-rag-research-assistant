@@ -20,7 +20,9 @@ _db = get_vectorstore()
 @tool
 def retrieve_docs(query: str) -> str:
     """Search the document knowledge base and return the most relevant chunks."""
-    docs = _db.similarity_search(query, k=4)
+    # k=6 (was 4) so cross-document questions have a better chance of pulling
+    # relevant chunks from more than one source document.
+    docs = _db.similarity_search(query, k=6)
     if not docs:
         return "No relevant documents found."
     return "\n\n---\n\n".join(d.page_content for d in docs)
