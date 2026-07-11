@@ -4,6 +4,7 @@ Run directly: python src/agent.py "your question here"
 """
 import sys
 import os
+import re
 from dotenv import load_dotenv
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
@@ -34,6 +35,16 @@ to search the knowledge base before answering any factual question about the doc
 Only answer from retrieved content. If retrieval returns no relevant information, say you
 don't have that information in the provided documents — do not answer from your own
 general knowledge, even for well-known facts."""
+
+# gpt-oss-120b occasionally leaks raw tool-call citation markers like
+# 【retrieve_docs】 into the final answer text. Strip these before returning
+# anything to the user — they're an internal formatting artifact, not
+# content meant to be displayed.
+_CITATION_ARTIFACT_RE = re.compile(r"【[^】]*】")
+
+
+def _clean(text: str) -> str:
+    return _CITATION_ARTIFACT_RE.sub("", text).strip()
 
 
 def _build_messages(question: str):
@@ -73,7 +84,7 @@ def run_agent(question: str) -> str:
             f"within a few minutes on the free tier). Details: {e}"
         )
     final_message = result["messages"][-1]
-    return final_message.content
+    return _clean(final_message.content)
 
 
 def stream_agent(question: str):
@@ -84,6 +95,12 @@ def stream_agent(question: str):
     empty strings. If a RateLimitError happens mid-stream, yields an error
     message and stops (no retry here, since partial output may already have
     been sent to the client).
+
+    Citation artifacts like 【retrieve_docs】 are stripped per-token where
+    possible, but since a marker can span multiple streamed chunks, a final
+    cleanup pass also happens in the API layer on the fully assembled answer
+    if needed. For most cases the per-chunk strip below is sufficient since
+    the artifact usually arrives as a single contiguous chunk.
     """
     try:
         for chunk, metadata in _agent.stream(
@@ -91,9 +108,10 @@ def stream_agent(question: str):
             stream_mode="messages",
         ):
             if isinstance(chunk, AIMessageChunk) and chunk.content:
-                # Only stream tokens from the agent's own response, not tool nodes
                 if metadata.get("langgraph_node") == "agent":
-                    yield chunk.content
+                    cleaned = _clean(chunk.content)
+                    if cleaned:
+                        yield cleaned
     except RateLimitError as e:
         yield (
             "\n\n[The model provider is currently rate-limited. "
