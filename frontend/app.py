@@ -32,15 +32,26 @@ if str(_REPO_ROOT) not in sys.path:
 
 # --- Bridge Streamlit secrets into os.environ so agent.py / vectorstore.py
 # --- (which read via os.getenv, unchanged from the Render version) keep working ---
-for _key in (
-    "GROQ_API_KEY",
-    "HUGGINGFACEHUB_API_TOKEN",
-    "QDRANT_URL",
-    "QDRANT_API_KEY",
-    "RESUME_SCREENER_URL",
-):
-    if _key in st.secrets:
-        os.environ[_key] = st.secrets[_key]
+_REQUIRED_SECRETS = ("GROQ_API_KEY", "HUGGINGFACEHUB_API_TOKEN", "QDRANT_URL", "QDRANT_API_KEY")
+_OPTIONAL_SECRETS = ("RESUME_SCREENER_URL",)
+
+_missing = []
+for _key in _REQUIRED_SECRETS + _OPTIONAL_SECRETS:
+    _val = st.secrets.get(_key)
+    if _val:
+        os.environ[_key] = str(_val)
+    elif _key in _REQUIRED_SECRETS:
+        _missing.append(_key)
+
+if _missing:
+    st.error(
+        "Missing required secret(s): "
+        + ", ".join(_missing)
+        + ". Go to your app's Settings -> Secrets on Streamlit Cloud, add them "
+        "in the form KEY = \"value\" (one per line, exact names above), Save, "
+        "then Manage app -> Reboot app."
+    )
+    st.stop()
 
 from qdrant_client.http.models import Filter, FieldCondition, MatchValue, PointStruct
 from langchain_text_splitters import RecursiveCharacterTextSplitter
