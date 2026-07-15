@@ -81,12 +81,18 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
 
+import re
+
+
 def _basename(source: str) -> str:
-    """PyPDFLoader (used in ingest.py) stores the full file path in the
-    'source' metadata field, e.g. 'data/raw/report.pdf'. Normalize down to
-    just the filename for display and for matching on delete.
+    """PyPDFLoader stores the full file path in the 'source' metadata field.
+    The original local ingest ran on Windows, so paths may use backslashes
+    (e.g. 'data\\raw\\report.pdf') instead of forward slashes — split on
+    either separator to get a clean filename either way.
     """
-    return os.path.basename(source) if source else "unknown"
+    if not source:
+        return "unknown"
+    return re.split(r"[\\/]", source)[-1]
 
 
 def _extract_source(payload: dict) -> str:
@@ -124,10 +130,9 @@ def ingest_pdf(filename: str, file_bytes: bytes) -> int:
     return len(chunks)
 
 
-def list_documents() -> list[dict]:
-    """Return [{filename, chunks}, ...] by scanning Qdrant point payloads."""
+def _scan_all_points():
+    """Yield every point in the collection (id + payload), handling pagination."""
     client = _get_client()
-    counts: dict[str, int] = {}
     next_offset = None
     while True:
         points, next_offset = client.scroll(
@@ -138,31 +143,36 @@ def list_documents() -> list[dict]:
             with_vectors=False,
         )
         for p in points:
-            filename = _basename(_extract_source(p.payload))
-            counts[filename] = counts.get(filename, 0) + 1
+            yield p
         if next_offset is None:
             break
+
+
+def list_documents() -> list[dict]:
+    """Return [{filename, chunks}, ...] by scanning Qdrant point payloads."""
+    counts: dict[str, int] = {}
+    for p in _scan_all_points():
+        filename = _basename(_extract_source(p.payload))
+        counts[filename] = counts.get(filename, 0) + 1
     return [{"filename": f, "chunks": c} for f, c in sorted(counts.items())]
 
 
 def delete_document(filename: str) -> None:
-    """Deletes any point whose nested 'metadata.source' ends with this
-    filename — handles both bare filenames (sidebar uploads) and full
-    paths like 'data/raw/report.pdf' (original ingest.py uploads). Qdrant
-    supports dot notation to filter on nested payload fields.
+    """Find every point whose normalized filename matches, by ID, then
+    delete by ID list. This sidesteps any uncertainty about Qdrant's
+    server-side filter syntax on nested/legacy payload shapes — it's a
+    plain client-side match against the same logic list_documents() uses,
+    so if a doc shows up in the list, delete is guaranteed to find it.
     """
+    matching_ids = [
+        p.id for p in _scan_all_points()
+        if _basename(_extract_source(p.payload)) == filename
+    ]
+    if not matching_ids:
+        raise ValueError(f"No stored chunks matched filename '{filename}'.")
+
     client = _get_client()
-    client.delete(
-        collection_name=COLLECTION_NAME,
-        points_selector=Filter(
-            should=[
-                FieldCondition(key="metadata.source", match=MatchValue(value=filename)),
-                FieldCondition(key="metadata.source", match=MatchValue(value=f"data/raw/{filename}")),
-                FieldCondition(key="source", match=MatchValue(value=filename)),
-                FieldCondition(key="source", match=MatchValue(value=f"data/raw/{filename}")),
-            ]
-        ),
-    )
+    client.delete(collection_name=COLLECTION_NAME, points_selector=matching_ids)
 
 
 # ---------------------------------------------------------------------------
