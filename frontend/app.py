@@ -89,6 +89,16 @@ def _basename(source: str) -> str:
     return os.path.basename(source) if source else "unknown"
 
 
+def _extract_source(payload: dict) -> str:
+    """langchain-qdrant nests document metadata under payload['metadata'],
+    e.g. {'page_content': ..., 'metadata': {'source': 'data/raw/x.pdf'}} —
+    not as a flat top-level field. Check both, nested first.
+    """
+    payload = payload or {}
+    metadata = payload.get("metadata") or {}
+    return metadata.get("source") or payload.get("source") or ""
+
+
 def ingest_pdf(filename: str, file_bytes: bytes) -> int:
     """Extract text from a PDF, chunk it, embed it, and store it in Qdrant
     tagged with its source filename — same metadata key ("source") and
@@ -128,7 +138,7 @@ def list_documents() -> list[dict]:
             with_vectors=False,
         )
         for p in points:
-            filename = _basename((p.payload or {}).get("source", ""))
+            filename = _basename(_extract_source(p.payload))
             counts[filename] = counts.get(filename, 0) + 1
         if next_offset is None:
             break
@@ -136,15 +146,18 @@ def list_documents() -> list[dict]:
 
 
 def delete_document(filename: str) -> None:
-    """Deletes any point whose 'source' metadata ends with this filename —
-    handles both bare filenames (sidebar uploads) and full paths like
-    'data/raw/report.pdf' (original ingest.py uploads).
+    """Deletes any point whose nested 'metadata.source' ends with this
+    filename — handles both bare filenames (sidebar uploads) and full
+    paths like 'data/raw/report.pdf' (original ingest.py uploads). Qdrant
+    supports dot notation to filter on nested payload fields.
     """
     client = _get_client()
     client.delete(
         collection_name=COLLECTION_NAME,
         points_selector=Filter(
             should=[
+                FieldCondition(key="metadata.source", match=MatchValue(value=filename)),
+                FieldCondition(key="metadata.source", match=MatchValue(value=f"data/raw/{filename}")),
                 FieldCondition(key="source", match=MatchValue(value=filename)),
                 FieldCondition(key="source", match=MatchValue(value=f"data/raw/{filename}")),
             ]
