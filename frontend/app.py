@@ -1,20 +1,54 @@
 """
-Phase 5b — Streamlit frontend for the assistant.
-Run: streamlit run frontend/app.py
-(Make sure the backend is running first: uvicorn src.api:app --reload)
-"""
-import streamlit as st
-import requests
-import time
-import os
-from dotenv import load_dotenv
-load_dotenv()
+Merged Streamlit frontend + backend for the Agentic RAG Research Assistant.
 
-# Derive base URL once, build all endpoints from it
-API_BASE = os.getenv("API_URL", "http://localhost:8000").rstrip("/ask").rstrip("/")
-STREAM_URL = f"{API_BASE}/ask/stream"
-UPLOAD_URL = f"{API_BASE}/upload"
-DOCUMENTS_URL = f"{API_BASE}/documents"
+This replaces the old split architecture (Streamlit frontend -> HTTP -> FastAPI
+backend on Render) with a single self-contained Streamlit app. There is no
+separate backend anymore, so there is nothing that can be "suspended" by
+Render's free-tier hour cap — everything runs inside this one process.
+
+Run locally:  streamlit run frontend/app.py
+Deploy:       Streamlit Community Cloud, main file path = frontend/app.py
+
+Required secrets (Streamlit Cloud -> App settings -> Secrets, or a local
+.streamlit/secrets.toml):
+    GROQ_API_KEY = "..."
+    HUGGINGFACEHUB_API_TOKEN = "..."
+    QDRANT_URL = "..."
+    QDRANT_API_KEY = "..."
+    RESUME_SCREENER_URL = "..."   # optional, screen_resume degrades gracefully without it
+"""
+import os
+import sys
+import time
+import uuid
+import pathlib
+
+import streamlit as st
+
+# --- Make src/ importable regardless of Streamlit Cloud's working directory ---
+_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# --- Bridge Streamlit secrets into os.environ so agent.py / vectorstore.py
+# --- (which read via os.getenv, unchanged from the Render version) keep working ---
+for _key in (
+    "GROQ_API_KEY",
+    "HUGGINGFACEHUB_API_TOKEN",
+    "QDRANT_URL",
+    "QDRANT_API_KEY",
+    "RESUME_SCREENER_URL",
+):
+    if _key in st.secrets:
+        os.environ[_key] = st.secrets[_key]
+
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue, PointStruct
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
+import io
+
+from src.agent import run_agent, stream_agent            # noqa: E402  (import after sys.path fix)
+from src.vectorstore import get_vectorstore, _get_client, COLLECTION_NAME  # noqa: E402
 
 st.set_page_config(page_title="Research Assistant", page_icon="🔎")
 st.title("🔎 Agentic RAG Research Assistant")
@@ -22,31 +56,112 @@ st.caption("Ask a question — the agent will retrieve documents, route to the r
 
 if "last_upload_status" not in st.session_state:
     st.session_state.last_upload_status = None
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-# --- Sidebar: PDF upload + document list ---
+
+# ---------------------------------------------------------------------------
+# In-process replacements for what src/api.py used to do over HTTP
+# ---------------------------------------------------------------------------
+
+# Matches src/ingest.py exactly, so chunks from new sidebar uploads are the
+# same granularity as chunks already in Qdrant from the original ingest run.
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 100
+
+
+def _basename(source: str) -> str:
+    """PyPDFLoader (used in ingest.py) stores the full file path in the
+    'source' metadata field, e.g. 'data/raw/report.pdf'. Normalize down to
+    just the filename for display and for matching on delete.
+    """
+    return os.path.basename(source) if source else "unknown"
+
+
+def ingest_pdf(filename: str, file_bytes: bytes) -> int:
+    """Extract text from a PDF, chunk it, embed it, and store it in Qdrant
+    tagged with its source filename — same metadata key ("source") and
+    chunk settings as the original src/ingest.py, so documents uploaded via
+    this sidebar are indistinguishable from ones ingested locally.
+    """
+    reader = PdfReader(io.BytesIO(file_bytes))
+    full_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    if not full_text.strip():
+        raise ValueError("No extractable text found in this PDF.")
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
+    )
+    chunks = splitter.split_text(full_text)
+    if not chunks:
+        raise ValueError("PDF produced no chunks after splitting.")
+
+    vectorstore = get_vectorstore()
+    ids = [str(uuid.uuid4()) for _ in chunks]
+    metadatas = [{"source": filename} for _ in chunks]
+    vectorstore.add_texts(texts=chunks, metadatas=metadatas, ids=ids)
+    return len(chunks)
+
+
+def list_documents() -> list[dict]:
+    """Return [{filename, chunks}, ...] by scanning Qdrant point payloads."""
+    client = _get_client()
+    counts: dict[str, int] = {}
+    next_offset = None
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=256,
+            offset=next_offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for p in points:
+            filename = _basename((p.payload or {}).get("source", ""))
+            counts[filename] = counts.get(filename, 0) + 1
+        if next_offset is None:
+            break
+    return [{"filename": f, "chunks": c} for f, c in sorted(counts.items())]
+
+
+def delete_document(filename: str) -> None:
+    """Deletes any point whose 'source' metadata ends with this filename —
+    handles both bare filenames (sidebar uploads) and full paths like
+    'data/raw/report.pdf' (original ingest.py uploads).
+    """
+    client = _get_client()
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=Filter(
+            should=[
+                FieldCondition(key="source", match=MatchValue(value=filename)),
+                FieldCondition(key="source", match=MatchValue(value=f"data/raw/{filename}")),
+            ]
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sidebar: upload + knowledge base management (was calling UPLOAD_URL /
+# DOCUMENTS_URL on the old Render backend, now calls the functions above)
+# ---------------------------------------------------------------------------
+
 with st.sidebar:
     st.header("📄 Upload a document")
     uploaded_file = st.file_uploader("Add a PDF to the knowledge base", type=["pdf"])
 
     if uploaded_file is not None:
         if st.button("Upload & Ingest"):
-            with st.spinner("Uploading and embedding... (first request after idle time can take up to a minute)"):
+            with st.spinner("Uploading and embedding..."):
                 try:
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
-                    resp = requests.post(UPLOAD_URL, files=files, timeout=300)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    if "error" in data:
-                        st.session_state.last_upload_status = ("error", data["error"])
-                    else:
-                        st.session_state.last_upload_status = (
-                            "success",
-                            f"Added {data['filename']} — {data['chunks_added']} chunks embedded.",
-                        )
-                except requests.RequestException as e:
+                    chunks_added = ingest_pdf(uploaded_file.name, uploaded_file.getvalue())
+                    st.session_state.last_upload_status = (
+                        "success",
+                        f"Added {uploaded_file.name} — {chunks_added} chunks embedded.",
+                    )
+                except Exception as e:
                     st.session_state.last_upload_status = ("error", f"Upload failed: {e}")
 
-    # Show the result of the last upload attempt, persisted across reruns
     if st.session_state.last_upload_status:
         kind, msg = st.session_state.last_upload_status
         if kind == "success":
@@ -58,10 +173,8 @@ with st.sidebar:
     st.header("📚 Knowledge base")
 
     try:
-        resp = requests.get(DOCUMENTS_URL, timeout=30)
-        resp.raise_for_status()
-        documents = resp.json().get("documents", [])
-    except requests.RequestException as e:
+        documents = list_documents()
+    except Exception as e:
         documents = []
         st.caption(f"Could not load document list: {e}")
 
@@ -76,15 +189,17 @@ with st.sidebar:
             with col2:
                 if st.button("🗑️", key=f"delete_{doc['filename']}"):
                     try:
-                        del_resp = requests.delete(f"{DOCUMENTS_URL}/{doc['filename']}", timeout=30)
-                        del_resp.raise_for_status()
+                        delete_document(doc["filename"])
                         st.session_state.last_upload_status = None
                         st.rerun()
-                    except requests.RequestException as e:
+                    except Exception as e:
                         st.error(f"Delete failed: {e}")
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+
+# ---------------------------------------------------------------------------
+# Chat (was POSTing to STREAM_URL on the old Render backend, now calls
+# stream_agent() directly, in-process, no HTTP)
+# ---------------------------------------------------------------------------
 
 question = st.chat_input("Ask a question...")
 
@@ -99,23 +214,7 @@ if question:
 
     with st.chat_message("assistant"):
         start = time.time()
-
-        def token_stream():
-            try:
-                with requests.post(
-                    STREAM_URL,
-                    json={"question": question},
-                    stream=True,
-                    timeout=100,
-                ) as resp:
-                    resp.raise_for_status()
-                    for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
-                        if chunk:
-                            yield chunk
-            except requests.RequestException as e:
-                yield f"Error contacting backend: {e}"
-
-        answer = st.write_stream(token_stream())
+        answer = st.write_stream(stream_agent(question))
         latency = round(time.time() - start, 2)
         st.caption(f"Latency: {latency}s")
 
