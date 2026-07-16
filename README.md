@@ -13,7 +13,7 @@ A portfolio-grade agentic RAG system: retrieval-augmented generation, tool-routi
 
 ![Agentic RAG Research Assistant — upload, embed, retrieve, grounded answer](./assets/agentic_rag_banner.png)
 
-**📹 Video walkthrough:** _[add your demo video link here — e.g. a Loom/YouTube URL or `./assets/demo.mp4`]_
+**📹 Video walkthrough:** https://github.com/user-attachments/assets/bb46f4d4-3467-45a5-8cbe-9e20da68142b
 
 The example above shows the agent answering a grounded question with a source citation, then correctly refusing a question the uploaded document doesn't cover — rather than guessing.
 
