@@ -128,7 +128,7 @@ def stream_agent(question: str):
             # chunks don't come through as AIMessageChunk with .content in the same
             # way final-answer text does, so the isinstance+content check above is
             # sufficient on its own without pinning to a specific node name.
-            if chunk.tool_calls or chunk.tool_call_chunks:
+            if getattr(chunk, "tool_calls", None) or getattr(chunk, "tool_call_chunks", None):
                 continue
 
             buffer += chunk.content
