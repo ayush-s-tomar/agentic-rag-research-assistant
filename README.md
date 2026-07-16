@@ -9,6 +9,16 @@ A portfolio-grade agentic RAG system: retrieval-augmented generation, tool-routi
 
 ---
 
+## Demo
+
+![Agentic RAG Research Assistant — upload, embed, retrieve, grounded answer](./assets/agentic_rag_banner.png)
+
+**📹 Video walkthrough:** _[add your demo video link here — e.g. a Loom/YouTube URL or `./assets/demo.mp4`]_
+
+The example above shows the agent answering a grounded question with a source citation, then correctly refusing a question the uploaded document doesn't cover — rather than guessing.
+
+---
+
 ## What it does
 
 Ask a question, and the agent:
@@ -21,23 +31,26 @@ A LoRA fine-tuned resume screener exists as a separate service and can be called
 ---
 
 ## Architecture
+
+```
 User question
-│
-▼
+     │
+     ▼
 FastAPI backend (src/api.py)  ──deployed on Render
-│
-▼
+     │
+     ▼
 LangGraph ReAct agent (src/agent.py)  ──Groq / gpt-oss-120b
-│
-├── retrieve_docs  → Chroma vector store (local documents)
-├── screen_resume  → fine-tuned LoRA resume screener (separate service)
-└── route_query    → answers via llama-3.1-8b-instant or gpt-oss-120b based on query complexity
-│
-▼
+     │
+     ├── retrieve_docs  → Chroma vector store (local documents)
+     ├── screen_resume  → fine-tuned LoRA resume screener (separate service)
+     └── route_query    → answers via llama-3.1-8b-instant or gpt-oss-120b based on query complexity
+     │
+     ▼
 Answer + latency logged to src/eval/request_log.csv
-│
-▼
+     │
+     ▼
 Streamlit frontend (frontend/app.py)  ──deployed on Streamlit Community Cloud
+```
 
 ## Tech stack
 
