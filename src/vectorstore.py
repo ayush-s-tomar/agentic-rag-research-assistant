@@ -30,6 +30,13 @@ COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "nimbus_docs")
 # a store with the wrong vector size.
 EMBEDDING_DIM = 384
 
+# Qdrant Cloud free-tier clusters can idle-suspend and take a while to wake,
+# similar to Render's old free-tier spin-down. Without an explicit timeout,
+# QdrantClient's underlying HTTP calls can hang indefinitely on a suspended
+# or unreachable cluster — which looks like a frozen app with nothing in
+# the logs. 15s is enough for a normal request; failing loud beats hanging.
+QDRANT_TIMEOUT = 15
+
 _embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 
 _client: QdrantClient | None = None
@@ -46,9 +53,21 @@ def _get_client() -> QdrantClient:
     if not url or not api_key:
         raise RuntimeError(
             "QDRANT_URL and QDRANT_API_KEY must be set in the environment "
-            "(.env locally, Render dashboard in production)."
+            "(.env locally, Streamlit Cloud secrets in production)."
         )
-    _client = QdrantClient(url=url, api_key=api_key)
+    try:
+        _client = QdrantClient(url=url, api_key=api_key, timeout=QDRANT_TIMEOUT)
+        # Force an actual network call now (client construction alone is lazy
+        # and won't surface a bad URL/host until first use) so a dead cluster
+        # fails here, clearly, instead of hanging on the first real query.
+        _client.get_collections()
+    except Exception as e:
+        _client = None
+        raise RuntimeError(
+            f"Could not connect to Qdrant at {url!r} within {QDRANT_TIMEOUT}s. "
+            "Check that the cluster is running (not paused/suspended on the "
+            f"free tier) and that QDRANT_URL/QDRANT_API_KEY are correct. Details: {e}"
+        )
     return _client
 
 
