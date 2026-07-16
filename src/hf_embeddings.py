@@ -1,62 +1,42 @@
-import requests
+"""
+Local embeddings using sentence-transformers.
+
+Previously this called HuggingFace's free serverless Inference API over
+HTTP. That API cold-starts unloaded models and is unreliable on the free
+tier - timeouts and 5xx errors were happening even with generous timeouts
+and clear error surfacing, because the failure is on HF's infrastructure,
+not in this code. Loading the same model locally with sentence-transformers
+removes the network dependency entirely: no token, no cold start, no
+timeout, no rate limit. The model (~130MB) downloads once on first run and
+is cached by HuggingFace's local cache afterward.
+
+Keeps the same class name and embed_documents/embed_query interface as
+before so nothing else in the codebase (vectorstore.py) needs to change
+its calling convention beyond how the class is constructed.
+"""
 from langchain_core.embeddings import Embeddings
+from sentence_transformers import SentenceTransformer
 
 
 class HFInferenceEmbeddings(Embeddings):
-    def __init__(self, api_token: str, model: str = "BAAI/bge-small-en-v1.5", timeout: int = 30):
-        self.url = f"https://router.huggingface.co/hf-inference/models/{model}/pipeline/feature-extraction"
-        self.headers = {"Authorization": f"Bearer {api_token}"}
-        # HF's serverless Inference API cold-starts unloaded models, which can
-        # take well over a minute with no response — without an explicit
-        # timeout, requests waits indefinitely, which is indistinguishable
-        # from a frozen app to the end user. 30s is enough for a cold start
-        # in practice; failing loud after that beats hanging forever.
-        self.timeout = timeout
+    def __init__(self, model: str = "BAAI/bge-small-en-v1.5", **_ignored_kwargs):
+        # **_ignored_kwargs absorbs the old api_token=... call site so
+        # vectorstore.py doesn't need to change its constructor call if
+        # it's still passing api_token - it'll just be silently unused.
+        # Loading happens once per process (this object is created once at
+        # module import time in vectorstore.py and reused).
+        self._model = SentenceTransformer(model)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        try:
-            response = requests.post(
-                self.url, headers=self.headers, json={"inputs": texts}, timeout=self.timeout
-            )
-            response.raise_for_status()
-        except requests.exceptions.Timeout:
-            raise RuntimeError(
-                f"HuggingFace Inference API did not respond within {self.timeout}s. "
-                "The model may be cold-starting — try again in a minute."
-            )
-        except requests.exceptions.HTTPError as e:
-            # IMPORTANT: response.text carries HF's actual explanation (e.g.
-            # "model X is not supported for task feature-extraction",
-            # "Invalid credentials", "model is loading", 404 route changes,
-            # etc). Without this, every failure looks identical and
-            # undiagnosable from the Streamlit error screen. Always surface
-            # status code + body, never just the exception repr.
-            body = ""
-            try:
-                body = response.text[:500]
-            except Exception:
-                pass
-            raise RuntimeError(
-                f"HuggingFace Inference API returned {response.status_code}: {e}\n"
-                f"Response body: {body}\n"
-                "Check that HUGGINGFACEHUB_API_TOKEN is valid, has inference "
-                "permissions, and that this model is available on the "
-                "serverless Inference API for the feature-extraction task."
-            )
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"HuggingFace Inference API request failed: {e}")
-
-        data = response.json()
-        # feature-extraction can return either a flat vector per input, or
-        # a nested [tokens][hidden_size] structure per input depending on
-        # the model/pipeline version — guard against the shape being wrong
-        # rather than returning garbage silently.
-        if not isinstance(data, list) or not data:
-            raise RuntimeError(
-                f"Unexpected response shape from HuggingFace Inference API: {type(data)}. "
-                f"Raw response: {str(data)[:500]}"
-            )
-        return data
+        if not texts:
+            return []
+        embeddings = self._model.encode(
+            texts,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        return embeddings.tolist()
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]

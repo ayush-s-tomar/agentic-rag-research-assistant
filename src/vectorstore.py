@@ -4,7 +4,7 @@ Shared Qdrant Cloud vectorstore module.
 Replaces local Chroma persistence (data/chroma_db) so the knowledge base
 survives Render free-tier spin-downs. Render wipes the local filesystem on
 every restart/redeploy/idle spin-down, which is why re-uploading was
-required every time — this module points at a persistent, externally
+required every time - this module points at a persistent, externally
 hosted vector store instead.
 
 Requires QDRANT_URL and QDRANT_API_KEY to be set in the environment
@@ -33,11 +33,15 @@ EMBEDDING_DIM = 384
 # Qdrant Cloud free-tier clusters can idle-suspend and take a while to wake,
 # similar to Render's old free-tier spin-down. Without an explicit timeout,
 # QdrantClient's underlying HTTP calls can hang indefinitely on a suspended
-# or unreachable cluster — which looks like a frozen app with nothing in
+# or unreachable cluster - which looks like a frozen app with nothing in
 # the logs. 15s is enough for a normal request; failing loud beats hanging.
 QDRANT_TIMEOUT = 15
 
-_embeddings = HFInferenceEmbeddings(api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+# Embeddings now run locally (sentence-transformers) instead of calling
+# HuggingFace's remote Inference API, so no api_token is needed here
+# anymore. HFInferenceEmbeddings still accepts and ignores stray kwargs,
+# but we no longer pass api_token at all since it has no effect.
+_embeddings = HFInferenceEmbeddings()
 
 _client: QdrantClient | None = None
 _vectorstore: QdrantVectorStore | None = None
@@ -85,7 +89,7 @@ def get_vectorstore() -> QdrantVectorStore:
 
     Creates the collection on first call if it doesn't exist yet. Safe to
     call from both the ingest path (adding documents) and the retrieve
-    path (similarity search) — both will share the same collection.
+    path (similarity search) - both will share the same collection.
     """
     global _vectorstore
     if _vectorstore is not None:
