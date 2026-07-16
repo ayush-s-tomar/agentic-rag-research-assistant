@@ -54,6 +54,33 @@ def _clean(text: str) -> str:
     return _CITATION_ARTIFACT_RE.sub("", text)
 
 
+def _chunk_text(content) -> str:
+    """Normalize an AIMessageChunk's .content into a plain string.
+
+    Depending on the installed langchain-openai/langchain-core version and
+    the model provider, .content can come back as either a plain string
+    (the common case) or a list of content blocks, e.g.
+    [{"type": "text", "text": "..."}]. If this isn't normalized, a list
+    return silently breaks string concatenation (buffer += chunk.content
+    raises TypeError, which — depending on where it's caught — can look
+    identical to "nothing streamed" from the UI's perspective). This
+    function makes stream_agent() correct regardless of which shape the
+    currently-installed version returns, instead of relying on local and
+    deployed environments happening to resolve identical package versions.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return ""
+
+
 def _build_messages(question: str):
     return {
         "messages": [
@@ -93,7 +120,7 @@ def run_agent(question: str) -> str:
     final_message = result["messages"][-1]
     # Safe to strip here — this is the complete, final assembled answer,
     # not an individual streamed fragment.
-    return _clean(final_message.content).strip()
+    return _clean(_chunk_text(final_message.content) or str(final_message.content)).strip()
 
 
 def stream_agent(question: str):
@@ -117,8 +144,9 @@ def stream_agent(question: str):
             _build_messages(question),
             stream_mode="messages",
         ):
-            if not (isinstance(chunk, AIMessageChunk) and chunk.content):
+            if not isinstance(chunk, AIMessageChunk):
                 continue
+
             # NOTE: previously filtered on metadata.get("langgraph_node") == "agent",
             # which matched langgraph.prebuilt.create_react_agent's internal node
             # name. After migrating to langchain.agents.create_agent (ahead of the
@@ -131,7 +159,11 @@ def stream_agent(question: str):
             if getattr(chunk, "tool_calls", None) or getattr(chunk, "tool_call_chunks", None):
                 continue
 
-            buffer += chunk.content
+            text = _chunk_text(chunk.content)
+            if not text:
+                continue
+
+            buffer += text
 
             while True:
                 start = buffer.find("【")
