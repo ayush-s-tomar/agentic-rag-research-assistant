@@ -1,12 +1,12 @@
 """
 Phase 3b — Agent that decides which tool(s) to call, then answers.
-Run directly: python src/agent.py "your question here"
+Run directly: python -m src.agent "your question here"
 """
 import sys
 import os
 import re
 from dotenv import load_dotenv
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, AIMessageChunk
 from openai import RateLimitError
@@ -28,7 +28,10 @@ llm = ChatOpenAI(
 )
 tools = [retrieve_docs, screen_resume, route_query]
 
-_agent = create_react_agent(llm, tools)
+# create_react_agent (langgraph.prebuilt) is deprecated as of LangGraph v1.0
+# and removed in v2.0 — migrated to langchain.agents.create_agent, its
+# direct replacement, same call signature.
+_agent = create_agent(llm, tools)
 
 SYSTEM_PROMPT = """You are a document research assistant. You MUST use the retrieve_docs tool
 to search the knowledge base before answering any factual question about the document(s).
