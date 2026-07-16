@@ -1,4 +1,8 @@
 # 🔎 Agentic RAG Research Assistant
+![CI](https://github.com/ayush-s-tomar/agentic-rag-research-assistant/actions/workflows/ci.yml/badge.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.11-blue.svg)
+![Streamlit](https://img.shields.io/badge/frontend-Streamlit-FF4B4B.svg)
 
 A portfolio-grade agentic RAG system: retrieval-augmented generation, tool-routing via LangGraph, cost-aware model selection, and a fine-tuned resume screener (separate service) — deployed and live.
 
