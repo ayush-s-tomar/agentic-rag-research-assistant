@@ -25,6 +25,16 @@ import pathlib
 
 import streamlit as st
 
+# st.set_page_config() MUST be the very first Streamlit command executed in
+# the script — before st.error/st.stop in the secrets check below, and
+# before the @st.cache_resource-decorated _init_backend() call (whose
+# show_spinner=... also issues a Streamlit command). Calling anything else
+# on `st` first raises StreamlitAPIException: "set_page_config() can only
+# be called once per app, and must be called as the first Streamlit
+# command in your script." Keep this block here, at the top, permanently —
+# do not move page_config down near st.title() again.
+st.set_page_config(page_title="Research Assistant", page_icon="🔎")
+
 # --- Make src/ importable regardless of Streamlit Cloud's working directory ---
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -102,7 +112,6 @@ stream_agent = _stream_agent
 get_vectorstore = _get_vectorstore_raw
 _get_client = _get_client_raw
 
-st.set_page_config(page_title="Research Assistant", page_icon="🔎")
 st.title("🔎 Agentic RAG Research Assistant")
 st.caption("Ask a question — the agent will retrieve documents, route to the right model, and answer.")
 
