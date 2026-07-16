@@ -58,8 +58,26 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 import io
 
-from src.agent import run_agent, stream_agent            # noqa: E402  (import after sys.path fix)
-from src.vectorstore import get_vectorstore, _get_client, COLLECTION_NAME  # noqa: E402
+# agent.py imports tools.py, which connects to Qdrant + the HF embeddings API
+# at MODULE IMPORT TIME (not lazily). If either is slow, misconfigured, or
+# unreachable, this import can hang with no error shown — which looks
+# identical to a stuck "loading" page with nothing in the Streamlit Cloud
+# logs. Wrapping it here at least surfaces a clear error if it fails fast;
+# if it just hangs, the real fix is adding timeout= to the Qdrant client and
+# the HF embeddings requests call in src/vectorstore.py / src/hf_embeddings.py
+# — a wrapper here cannot add a timeout to code that already started blocking.
+try:
+    with st.spinner("Connecting to the knowledge base and model provider..."):
+        from src.agent import run_agent, stream_agent            # noqa: E402
+        from src.vectorstore import get_vectorstore, _get_client, COLLECTION_NAME  # noqa: E402
+except Exception as e:
+    st.error(
+        "Failed to initialize the agent or vector store on startup. "
+        "This usually means Qdrant or the embeddings provider rejected the "
+        "connection (bad URL/key) rather than a code bug.\n\n"
+        f"Details: {e}"
+    )
+    st.stop()
 
 st.set_page_config(page_title="Research Assistant", page_icon="🔎")
 st.title("🔎 Agentic RAG Research Assistant")
