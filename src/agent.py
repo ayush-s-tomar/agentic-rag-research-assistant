@@ -119,7 +119,16 @@ def stream_agent(question: str):
         ):
             if not (isinstance(chunk, AIMessageChunk) and chunk.content):
                 continue
-            if metadata.get("langgraph_node") != "agent":
+            # NOTE: previously filtered on metadata.get("langgraph_node") == "agent",
+            # which matched langgraph.prebuilt.create_react_agent's internal node
+            # name. After migrating to langchain.agents.create_agent (ahead of the
+            # v2.0 removal), that node is named differently, so the old filter
+            # silently dropped every chunk and stream_agent() yielded nothing —
+            # the agent ran and answered, but nothing ever reached the UI. Tool-call
+            # chunks don't come through as AIMessageChunk with .content in the same
+            # way final-answer text does, so the isinstance+content check above is
+            # sufficient on its own without pinning to a specific node name.
+            if chunk.tool_calls or chunk.tool_call_chunks:
                 continue
 
             buffer += chunk.content
