@@ -58,26 +58,49 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 import io
 
-# agent.py imports tools.py, which connects to Qdrant + the HF embeddings API
-# at MODULE IMPORT TIME (not lazily). If either is slow, misconfigured, or
-# unreachable, this import can hang with no error shown — which looks
-# identical to a stuck "loading" page with nothing in the Streamlit Cloud
-# logs. Wrapping it here at least surfaces a clear error if it fails fast;
-# if it just hangs, the real fix is adding timeout= to the Qdrant client and
-# the HF embeddings requests call in src/vectorstore.py / src/hf_embeddings.py
-# — a wrapper here cannot add a timeout to code that already started blocking.
-try:
-    with st.spinner("Connecting to the knowledge base and model provider..."):
-        from src.agent import run_agent, stream_agent            # noqa: E402
-        from src.vectorstore import get_vectorstore, _get_client, COLLECTION_NAME  # noqa: E402
-except Exception as e:
+# agent.py / vectorstore.py construct network clients (Qdrant, Groq/OpenAI,
+# HF embeddings) at module import time. Streamlit reruns this entire script
+# on every user interaction — normally Python's import cache means a module
+# only executes once per process, but Streamlit Cloud's file-watcher/rerun
+# machinery can trigger re-execution more often than that guarantee holds.
+# Repeated client construction without teardown leaks memory until the
+# process gets OOM-killed and silently restarted by the platform, which from
+# the outside looks identical to a permanent hang or crash loop.
+#
+# st.cache_resource forces this init to run exactly ONCE per process no
+# matter how many times the script reruns, and shares the same objects
+# across all reruns and all users hitting this instance.
+from src.agent import run_agent as _run_agent, stream_agent as _stream_agent  # noqa: E402
+from src.vectorstore import (  # noqa: E402
+    get_vectorstore as _get_vectorstore_raw,
+    _get_client as _get_client_raw,
+    COLLECTION_NAME,
+)
+
+
+@st.cache_resource(show_spinner="Connecting to the knowledge base and model provider...")
+def _init_backend():
+    try:
+        vs = _get_vectorstore_raw()
+        return {"ok": True, "vectorstore": vs}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+_backend = _init_backend()
+if not _backend["ok"]:
     st.error(
-        "Failed to initialize the agent or vector store on startup. "
-        "This usually means Qdrant or the embeddings provider rejected the "
-        "connection (bad URL/key) rather than a code bug.\n\n"
-        f"Details: {e}"
+        "Backend initialization failed. This usually means Qdrant or the "
+        "embeddings provider rejected the connection (bad URL/key, or a "
+        "suspended free-tier cluster) rather than a code bug.\n\n"
+        f"Details: {_backend['error']}"
     )
     st.stop()
+
+run_agent = _run_agent
+stream_agent = _stream_agent
+get_vectorstore = _get_vectorstore_raw
+_get_client = _get_client_raw
 
 st.set_page_config(page_title="Research Assistant", page_icon="🔎")
 st.title("🔎 Agentic RAG Research Assistant")
