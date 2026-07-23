@@ -7,9 +7,6 @@
 A portfolio-grade agentic RAG system: retrieval-augmented generation, tool-routing via LangGraph, cost-aware model selection, and a fine-tuned resume screener (separate service) — deployed and live.
 
 **🔗 Live demo:** https://agentic-rag-groq.streamlit.app
-**🔗 API docs:** https://agentic-rag-research-assistant-jjch.onrender.com/docs
-
-> ⚠️ The backend runs on Render's free tier and sleeps after inactivity — the first request after idle can take 30–60s to wake up.
 
 ---
 
@@ -17,11 +14,15 @@ A portfolio-grade agentic RAG system: retrieval-augmented generation, tool-routi
 
 ![Agentic RAG Research Assistant — upload, embed, retrieve, grounded answer](./assets/agentic_rag_banner.png)
 
-### 📹 Video walkthrough
+### 🎞️ Quick preview
 
-<video src="https://github.com/user-attachments/assets/bb46f4d4-3467-45a5-8cbe-9e20da68142b" controls width="700">
+![Agentic RAG Assistant demo](./assets/demo.gif)
+
+### 📹 Full video walkthrough
+
+<video src="https://github.com/user-attachments/assets/3ba85f1c-b17e-4be7-9b18-1b11c8d29a18" controls width="700">
   Your browser doesn't support embedded videos. 
-  <a href="https://github.com/user-attachments/assets/bb46f4d4-3467-45a5-8cbe-9e20da68142b">Watch the demo video</a>.
+  <a href="https://github.com/user-attachments/assets/3ba85f1c-b17e-4be7-9b18-1b11c8d29a18">Watch the demo video</a>.
 </video>
 
 The example above shows the agent answering a grounded question with a source citation, then correctly refusing a question the uploaded document doesn't cover — rather than guessing.
@@ -45,7 +46,7 @@ A LoRA fine-tuned resume screener exists as a separate service and can be called
 User question
      │
      ▼
-FastAPI backend (src/api.py)  ──deployed on Render
+FastAPI backend (src/api.py)  ──run locally
      │
      ▼
 LangGraph ReAct agent (src/agent.py)  ──Groq / gpt-oss-120b
@@ -71,7 +72,6 @@ Streamlit frontend (frontend/app.py)  ──deployed on Streamlit Community Clou
 | Embeddings | HuggingFace `bge-small-en-v1.5` |
 | Backend | FastAPI |
 | Frontend | Streamlit |
-| Backend hosting | Render (free tier) |
 | Frontend hosting | Streamlit Community Cloud |
 
 > **Note on the model:** this project originally ran `llama-3.3-70b-versatile`. Groq deprecated that model on 2026-06-17 (shutdown 2026-08-16), so the agent was migrated to `openai/gpt-oss-120b` — Groq's recommended replacement, with full tool-calling support and a higher free-tier token budget (200K TPD vs 100K TPD).
@@ -125,15 +125,9 @@ streamlit run frontend\app.py
 
 ## Deployment
 
-**Backend (Render):**
-- Build command: `pip install -r requirements.txt && python src/ingest.py`
-- Start command: `uvicorn src.api:app --host 0.0.0.0 --port $PORT`
-- Environment variables: `GROQ_API_KEY`, `HUGGINGFACEHUB_API_TOKEN`
-- The vector store rebuilds from `data/raw/` on every deploy, since Render's free-tier filesystem doesn't persist across restarts.
-
 **Frontend (Streamlit Community Cloud):**
 - Main file: `frontend/app.py`
-- Secret: `API_URL = "https://agentic-rag-research-assistant-jjch.onrender.com"`
+- Backend runs locally alongside the frontend — see Quickstart above.
 
 CORS on the backend is scoped to the deployed Streamlit origin only.
 
@@ -143,7 +137,6 @@ CORS on the backend is scoped to the deployed Streamlit origin only.
 
 - **Groq over OpenAI** — chosen for fast, cheap inference, at the cost of occasional tool-calling quirks on ambiguous questions (see Known limitations).
 - **Strict grounding via system prompt** — the agent is instructed to refuse rather than answer from general knowledge, prioritizing trustworthiness over coverage.
-- **Chroma rebuilt on every deploy** rather than persisted, trading a few seconds of startup time for zero infra complexity on the free tier.
 - **Two-model routing** — `route_query` answers low-complexity questions with `llama-3.1-8b-instant` instead of always paying `gpt-oss-120b` pricing/latency. The complexity gate is a word-count heuristic, not a trained classifier — cheap to run, occasionally wrong on edge cases.
 
 ## Known limitations
@@ -162,4 +155,4 @@ Cost comparison (`src/eval/cost_comparison.py`) pulls real per-model traffic fro
 
 ## What I'd improve with more time
 
-Persistent vector store (avoid full rebuild on every Render deploy), a trained complexity classifier in place of the word-count heuristic, and a stricter tool-calling system prompt to eliminate the occasional malformed Groq tool call.
+A trained complexity classifier in place of the word-count heuristic, a stricter tool-calling system prompt to eliminate the occasional malformed Groq tool call, and a persistent vector store for a future hosted deployment.
