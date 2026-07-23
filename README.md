@@ -7,6 +7,7 @@
 A portfolio-grade agentic RAG system: retrieval-augmented generation, tool-routing via LangGraph, cost-aware model selection, and a fine-tuned resume screener (separate service) — deployed and live.
 
 **🔗 Live demo:** https://agentic-rag-groq.streamlit.app
+*(runs entirely on Streamlit Community Cloud — no separate backend required)*
 
 ---
 
@@ -32,34 +33,42 @@ The example above shows the agent answering a grounded question with a source ci
 ## What it does
 
 Ask a question, and the agent:
-1. Retrieves relevant chunks from a Chroma vector store built from your uploaded PDFs
+1. Retrieves relevant chunks from a Qdrant Cloud vector store built from your uploaded PDFs
 2. Answers **only** from retrieved content — if nothing relevant is found, it says so instead of guessing
 3. Routes queries between `llama-3.1-8b-instant` and `openai/gpt-oss-120b` based on complexity, so short factual questions don't pay large-model latency/cost
 
 A LoRA fine-tuned resume screener exists as a separate service and can be called via `screen_resume` — not wired into the live demo's default flow.
 
+A standalone FastAPI backend (`src/api.py`) also exists for running the agent as an HTTP API — useful for local development or integrating into other tools — but it is **not** required for the live Streamlit demo above, which talks to Groq and Qdrant directly.
+
 ---
 
 ## Architecture
 
+**Live demo (Streamlit Community Cloud) — self-contained:**
 ```
 User question
      │
      ▼
-FastAPI backend (src/api.py)  ──run locally
+Streamlit app (frontend/app.py)
      │
      ▼
 LangGraph ReAct agent (src/agent.py)  ──Groq / gpt-oss-120b
      │
-     ├── retrieve_docs  → Chroma vector store (local documents)
+     ├── retrieve_docs  → Qdrant Cloud vector store
      ├── screen_resume  → fine-tuned LoRA resume screener (separate service)
      └── route_query    → answers via llama-3.1-8b-instant or gpt-oss-120b based on query complexity
      │
      ▼
 Answer + latency logged to src/eval/request_log.csv
+```
+
+**Optional standalone API (local use only):**
+```
+FastAPI backend (src/api.py)  ──run locally
      │
      ▼
-Streamlit frontend (frontend/app.py)  ──deployed on Streamlit Community Cloud
+LangGraph ReAct agent (src/agent.py)  — same agent as above, exposed over HTTP
 ```
 
 ## Tech stack
@@ -68,9 +77,9 @@ Streamlit frontend (frontend/app.py)  ──deployed on Streamlit Community Clou
 |---|---|
 | LLM inference | Groq — `openai/gpt-oss-120b` (primary), `llama-3.1-8b-instant` (routed, low-complexity queries) |
 | Agent framework | LangGraph (ReAct agent) |
-| Vector store | Chroma |
+| Vector store | Qdrant Cloud |
 | Embeddings | HuggingFace `bge-small-en-v1.5` |
-| Backend | FastAPI |
+| Backend (optional, local) | FastAPI |
 | Frontend | Streamlit |
 | Frontend hosting | Streamlit Community Cloud |
 
@@ -86,7 +95,11 @@ python -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
-# then edit .env and add your GROQ_API_KEY (https://console.groq.com)
+# then edit .env and add:
+#   GROQ_API_KEY            (https://console.groq.com)
+#   HUGGINGFACEHUB_API_TOKEN
+#   QDRANT_URL
+#   QDRANT_API_KEY           (https://cloud.qdrant.io)
 
 # 2. Add documents
 # Drop PDF files into data\raw\
@@ -100,11 +113,11 @@ python src\retrieve_test.py "a question about your documents"
 # 5. Test the full agent directly
 python src\agent.py "a question about your documents"
 
-# 6. Run the backend
+# 6. (Optional) Run the standalone API backend
 uvicorn src.api:app --reload
 # visit http://localhost:8000/docs
 
-# 7. Run the frontend (in a second terminal, venv activated)
+# 7. Run the frontend — this is all you need for the full app
 streamlit run frontend\app.py
 ```
 
@@ -125,9 +138,14 @@ streamlit run frontend\app.py
 
 ## Deployment
 
-**Frontend (Streamlit Community Cloud):**
+**Frontend (Streamlit Community Cloud) — this is the live demo:**
 - Main file: `frontend/app.py`
-- Backend runs locally alongside the frontend — see Quickstart above.
+- Self-contained: calls Groq and Qdrant Cloud directly, no separate backend service needed.
+- Required secrets in Streamlit Cloud: `GROQ_API_KEY`, `HUGGINGFACEHUB_API_TOKEN`, `QDRANT_URL`, `QDRANT_API_KEY`.
+
+**Standalone API backend (optional, local only):**
+- `src/api.py` exposes the same agent over FastAPI for local development or external integrations.
+- Not deployed anywhere currently — run it locally per the Quickstart if you need HTTP access to the agent.
 
 CORS on the backend is scoped to the deployed Streamlit origin only.
 
@@ -137,6 +155,7 @@ CORS on the backend is scoped to the deployed Streamlit origin only.
 
 - **Groq over OpenAI** — chosen for fast, cheap inference, at the cost of occasional tool-calling quirks on ambiguous questions (see Known limitations).
 - **Strict grounding via system prompt** — the agent is instructed to refuse rather than answer from general knowledge, prioritizing trustworthiness over coverage.
+- **Qdrant Cloud over a local/self-hosted vector store** — avoids managing persistence and infra myself, at the cost of depending on a third-party free tier.
 - **Two-model routing** — `route_query` answers low-complexity questions with `llama-3.1-8b-instant` instead of always paying `gpt-oss-120b` pricing/latency. The complexity gate is a word-count heuristic, not a trained classifier — cheap to run, occasionally wrong on edge cases.
 
 ## Known limitations
@@ -155,4 +174,4 @@ Cost comparison (`src/eval/cost_comparison.py`) pulls real per-model traffic fro
 
 ## What I'd improve with more time
 
-A trained complexity classifier in place of the word-count heuristic, a stricter tool-calling system prompt to eliminate the occasional malformed Groq tool call, and a persistent vector store for a future hosted deployment.
+A trained complexity classifier in place of the word-count heuristic, a stricter tool-calling system prompt to eliminate the occasional malformed Groq tool call, and a persistent local fallback for a future hosted deployment of the standalone API.
